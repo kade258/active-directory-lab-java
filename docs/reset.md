@@ -1,6 +1,6 @@
 # Reset and cleanup
 
-**Java demo:** stop with Ctrl+C and restart. The seeded in-memory directory returns and session changes/activity disappear. No database or password file is written.
+**Java demo:** changes and activity now survive restart. Stop Java and use a fresh folder with `--data-dir .adlab/new-practice` to start a new exercise while preserving old evidence. See [saved state and audit](storage-and-audit.md). Delete a data folder only after identifying it as disposable and saving wanted evidence.
 
 **Real AD:** stopping Java does not roll back changes. Inspect and remove only disposable objects using ADUC under your lab cleanup plan. No bulk deletion or domain teardown endpoint is included.
 

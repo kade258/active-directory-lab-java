@@ -4,9 +4,9 @@ A Java 21 directory-management dashboard for practicing help desk and junior adm
 
 **Run the demo on macOS, Windows or Linux with only a JDK.** Switch to LDAPS mode to perform the same operations against your own isolated Active Directory lab.
 
-![Java demo dashboard with fictional users and session activity](docs/images/dashboard.png)
+![Java demo dashboard with fictional users and saved activity](docs/images/dashboard.png)
 
-> Demo mode is an in-memory simulation, not an Active Directory server. The LDAPS adapter is implemented, but has not been tested against a live domain controller in this project's initial verification. Automated checks exercise demo behavior, HTTP routes, validation, and LDAP encoding and configuration guards.
+> Demo mode is a locally saved simulation, not an Active Directory server. No Windows lab is available yet, so live domain results remain **not run**. The project includes a real LDAPS adapter, a live validation runner, Windows permission/delegation checks, and automated tests using an instrumented LDAP context. See [validation status](docs/implementation-results.md).
 
 ## Features
 
@@ -20,7 +20,10 @@ A Java 21 directory-management dashboard for practicing help desk and junior adm
 | Unlock accounts | Clear simulated lock | Set `lockoutTime=0` |
 | Add/remove direct membership | Update local membership | Modify the group's `member` attribute |
 | Simulate account lock | Available for exercises | Disabled |
-| Review activity | Last 50 successful session actions | Same app history; authoritative audit is in AD |
+| Move/disable accounts | Saved department and enabled state | Scoped LDAP rename and UAC updates preserving unrelated flags |
+| Help desk tickets | Four scenarios with state-based checks | Same checks against the connected lab OU |
+| Review activity | Saved attempts, success, failure and partial outcomes | Separate saved AD journal; authoritative audit is in Windows |
+| Export evidence | Mode-labeled results and event CSV | Same exports plus independent Windows validation tools |
 
 Permissions in this app are **group membership assignments**. Windows file/share ACLs, OU delegation, nested membership and primary-group membership are configured outside the app. The dashboard does not edit arbitrary ACLs or implement Windows authentication.
 
@@ -46,7 +49,7 @@ Set-Location active-directory-lab-java
 java -jar .build/active-directory-lab.jar
 ```
 
-Open **[http://127.0.0.1:8080](http://127.0.0.1:8080)**. Stop with **Ctrl+C**. Demo data and activity reset when Java restarts. Seeded users have random initial passwords; use **Manage → Reset password** to set one for an exercise. There is no user sign-in endpoint.
+Open **[http://127.0.0.1:8080](http://127.0.0.1:8080)**. Stop with **Ctrl+C**. Demo data and activity are saved in ignored `.adlab/` files and survive restarts. Seeded users have random initial passwords; use **Manage → Reset password** to set one for an exercise. There is no user sign-in endpoint. See [storage and reset behavior](docs/storage-and-audit.md).
 
 If a downloaded PowerShell script is blocked, inspect it, then use `Unblock-File .\tools\Build.ps1`. Your organization's execution policy may require an approved way to run scripts.
 
@@ -62,6 +65,14 @@ If a downloaded PowerShell script is blocked, inspect it, then use `Unblock-File
 
 See [guided exercises](docs/exercises.md) and the [validation checklist](docs/validation.md).
 
+## Complete realistic tickets
+
+Open **Help desk tickets** to practice onboarding, locked-account recovery, a department transfer and offboarding. Checks are derived from actual app state and saved activity, and reopen if you undo a requirement. See [scenario walkthroughs](docs/scenarios.md).
+
+![Help desk scenario checks in Demo mode](docs/images/tickets.png)
+
+Use **Results & evidence** to download your results and **Activity** to export attempts/outcomes. Files exclude passwords, password hashes and raw server diagnostics. Exported reports explicitly distinguish demo observations from independent Windows evidence. See the [short walkthrough](docs/walkthrough.md) and [results template](docs/results-template.md).
+
 ## Connect to your own Active Directory lab
 
 Follow [Windows setup](docs/setup.md), then [Java LDAPS setup](docs/ldap.md). The Java machine must resolve and reach your domain controller. The adapter uses a delegated operator account and only manages descendants of the configured root OU.
@@ -71,6 +82,8 @@ java -jar .build/active-directory-lab.jar --ldap config/ldap.properties
 ```
 
 Enter the bind password at the masked terminal prompt. It is not stored in the properties file or passed on the command line. AD mode requires a trusted LDAPS certificate, a dedicated lab OU and delegated rights. It does not fall back to plaintext LDAP or demo data on connection failure.
+
+Then follow the [live integration runner](docs/live-validation.md) and [shared-folder permission demonstration](docs/permissions-demo.md). The Windows tools prepare a disposable share and produce actual denied → allowed → denied access evidence. They also test a delegated operator's OU-creation boundary. These tools are prepared; Windows outcomes are not claimed until you run them.
 
 ## Tests
 
@@ -84,7 +97,7 @@ sh tools/test.sh
 .\tools\Build.ps1 -Test
 ```
 
-The dependency-free suite checks password replacement, lock/unlock behavior, case-insensitive account names, membership, duplicate/invalid input, escaped LDAP names, quoted UTF-16LE passwords, protected HTTP writes, request limits, bundled assets and password exclusion from responses. GitHub Actions runs it on Linux and Windows and parses the optional Windows infrastructure scripts.
+The dependency-free suite checks persistence/reload, hashes, lock/unlock, transfer/offboarding, membership, case-insensitive names, invalid input, protected HTTP writes, request limits, exports and password exclusion. Instrumented LDAP tests verify the OU boundary before writes, permission failures, connection loss, staged account creation, partial resets, and preservation of unrelated account flags. GitHub Actions runs on Linux and Windows, parses Windows scripts, and publishes a runnable JAR artifact with a SHA-256 checksum.
 
 Live AD behavior, certificates, delegation, Windows sign-in and VM provisioning require the separate [VM validation checklist](docs/validation.md).
 
@@ -94,7 +107,9 @@ Live AD behavior, certificates, delegation, Windows sign-in and VM provisioning 
 flowchart LR
   UI[Local browser dashboard] --> HTTP[Java HTTP server\n127.0.0.1:8080]
   HTTP --> API[Directory interface]
-  API --> Demo[DemoDirectory\nIn-memory simulation]
+  API --> Demo[DemoDirectory\nAtomically saved simulation]
+  HTTP --> Audit[Saved attempt and outcome journal]
+  HTTP --> Tickets[Scenario checks and evidence exports]
   API --> LDAP[LdapDirectory\nJNDI + LDAPS]
   LDAP --> AD[Your lab domain controller\nDedicated lab OU]
 ```
@@ -109,7 +124,7 @@ flowchart LR
 | `scripts/`, `config/lab.psd1`, `data/users.csv` | Optional Windows guest setup and initial AD objects |
 | `docs/` | Setup, exercises, troubleshooting and validation |
 
-This is a single-operator local learning tool. It binds only to IPv4 loopback, checks its Host header, rejects cross-origin writes and requires a random per-process request token. It has no multi-user authentication or durable audit store. Other processes with access to your local account can interact with it. Keep it local; do not expose it through a public proxy or network listener.
+This is a single-operator local learning tool. It binds only to IPv4 loopback, checks its Host header, rejects cross-origin writes and requires a random per-process request token. Its saved application journal is not tamper-proof or a substitute for Windows security auditing. It has no multi-user authentication. Other processes with access to your local account can interact with it. Keep it local; do not expose it through a public proxy or network listener.
 
 ## Portfolio wording
 

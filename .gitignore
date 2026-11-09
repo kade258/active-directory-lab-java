@@ -28,3 +28,4 @@ config/ldap.properties
 *.log
 evidence/
 reports/
+.adlab/

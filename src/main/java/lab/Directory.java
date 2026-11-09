@@ -17,6 +17,8 @@ public interface Directory extends AutoCloseable {
     void resetPassword(String username, char[] password) throws Exception;
     void unlock(String username) throws Exception;
     void setMembership(String username, String group, boolean member) throws Exception;
+    void moveUser(String username, String ou) throws Exception;
+    void setEnabled(String username, boolean enabled) throws Exception;
     default void simulateLock(String username) throws Exception {
         throw new IllegalArgumentException("Account lock simulation is available only in demo mode.");
     }

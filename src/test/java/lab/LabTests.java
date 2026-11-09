@@ -6,6 +6,9 @@ import java.nio.charset.StandardCharsets;
 import java.util.*;
 import java.util.regex.*;
 import javax.naming.ldap.LdapName;
+import java.nio.file.*;
+import java.lang.reflect.*;
+import java.lang.reflect.Proxy;
 
 /** Dependency-free behavioral tests: run with tools/test.sh or tools/Build.ps1 -Test. */
 public final class LabTests {
@@ -59,6 +62,10 @@ public final class LabTests {
         check(demo.snapshot().groups().stream().anyMatch(g -> g.name().equals("GG_Helpdesk") && g.members().isEmpty()), "Membership removal");
         rejects(() -> demo.unlock("unknown"), "Unknown user rejected");
         rejects(() -> demo.setMembership("sam.rivera", "missing", true), "Unknown group rejected");
+        demo.moveUser("sam.rivera", "HR"); demo.setEnabled("sam.rivera", false);
+        check(demo.snapshot().users().stream().anyMatch(u -> u.username().equals("sam.rivera") && u.ou().equals("HR") && !u.enabled()), "Transfer and disable update account");
+        rejects(() -> demo.moveUser("sam.rivera", "missing"), "Move to nonexistent OU rejected");
+        check(demo.snapshot().users().stream().anyMatch(u -> u.username().equals("sam.rivera") && u.ou().equals("HR")), "Failed transfer preserves location");
         check(Json.encode(Map.of("quote", "\"\\\n\u0001")).contains("\\u0001"), "JSON escapes control characters");
         String dn = LdapDirectory.child("OU", "IT,DC=outside", "OU=Lab,DC=example,DC=test");
         LdapName parsed = new LdapName(dn);
@@ -103,7 +110,108 @@ public final class LabTests {
             check(response.body().contains("GG_Support") && response.body().contains("Sam <Rivera>"), "Created objects appear in directory");
             check(!response.body().contains("Testing!") && !response.body().contains("Fictional!"), "No passwords in state or audit");
             check(response.body().contains("reset-password") && response.body().contains("membership"), "Successful changes audited");
+            check(response.body().contains("FAILED") && response.body().contains("REJECTED") && response.body().contains("STARTED"), "Failures and rejected writes audited alongside attempts");
+            check(post(client, action, token, form("action", "move-user", "username", "sam.rivera", "ou", "HR")).statusCode() == 200, "HTTP department move succeeds");
+            check(post(client, action, token, form("action", "set-enabled", "username", "sam.rivera", "enabled", "false")).statusCode() == 200, "HTTP offboarding disable succeeds");
+            check(post(client, action, token, form("action", "set-enabled", "username", "sam.rivera", "enabled", "maybe")).statusCode() == 400, "Ambiguous enable/disable rejected");
+            response = client.send(HttpRequest.newBuilder(base.resolve("/api/report")).GET().build(), HttpResponse.BodyHandlers.ofString());
+            check(response.statusCode() == 200 && response.body().contains("DEMO") && response.body().contains("HD-101") && response.body().contains("require separate evidence"), "Report labels simulated evidence honestly");
+            response = client.send(HttpRequest.newBuilder(base.resolve("/api/audit.csv")).GET().build(), HttpResponse.BodyHandlers.ofString());
+            check(response.statusCode() == 200 && response.body().contains("SUCCEEDED") && response.body().contains("FAILED") && !response.body().contains("Testing!"), "Audit export includes outcomes without passwords");
         }
+        persistence();
+        partialAndDenied();
+        unavailableJournal();
+        checks += LdapAdapterTests.run();
         System.out.println("PASS: " + checks + " behavioral checks. Live AD integration requires the documented Windows lab.");
+    }
+
+    private static void persistence() throws Exception {
+        Path folder = Files.createTempDirectory("adlab-test-");
+        try {
+            Path data = folder.resolve("demo.properties");
+            DemoDirectory saved = new DemoDirectory(data);
+            saved.createOu("Support"); saved.createGroup("GG_Support", "Support");
+            saved.createUser("sam.rivera", "Sam Rivera", "Support", password("Persistent!Pass123"));
+            saved.setMembership("sam.rivera", "GG_Support", true); saved.simulateLock("sam.rivera");
+            saved.resetPassword("sam.rivera", password("Persistent!Reset456")); saved.setEnabled("casey.brooks", false);
+            Directory.Snapshot before = saved.snapshot(); DemoDirectory reloaded = new DemoDirectory(data);
+            check(before.equals(reloaded.snapshot()), "All demo objects, flags and memberships survive reload");
+            check(reloaded.matchesPassword("sam.rivera", password("Persistent!Reset456")), "Password hash survives reload");
+            check(!reloaded.matchesPassword("sam.rivera", password("Persistent!Pass123")), "Old password stays invalid after restart");
+            check(!Files.readString(data).contains("Persistent!"), "No plaintext password in saved state");
+            try (var children = Files.list(folder)) { check(children.noneMatch(p -> p.getFileName().toString().startsWith(".write-")), "Atomic saves leave no temporary file"); }
+            Path journal = folder.resolve("audit.tsv"); AuditLog audit = new AuditLog(journal);
+            String id = UUID.randomUUID().toString();
+            audit.record(id, "demo", "reset-password", "sam.rivera", "STARTED", "LocalOperator");
+            audit.record(id, "demo", "reset-password", "sam.rivera", "FAILED", "NoPermissionException");
+            audit.record(UUID.randomUUID().toString(), "demo", "create-ou", "=FORMULA()", "REJECTED", "Validation");
+            AuditLog loaded = new AuditLog(journal);
+            check(loaded.all().equals(audit.all()), "Audit outcomes and correlation IDs survive reload");
+            check(loaded.csv().contains("'=FORMULA()"), "Audit CSV neutralizes formula injection");
+            try (LocalFiles.Lock held = new LocalFiles.Lock(folder)) {
+                try (LocalFiles.Lock duplicate = new LocalFiles.Lock(folder)) { throw new AssertionError("Concurrent data folder lock acquired"); }
+                catch (java.io.IOException expected) { checks++; }
+            }
+            try (LocalFiles.Lock released = new LocalFiles.Lock(folder)) { checks++; }
+            Files.writeString(data, "version=damaged\n");
+            try { new DemoDirectory(data); throw new AssertionError("Damaged data silently reset"); }
+            catch (java.io.IOException expected) { checks++; }
+            check(Files.readString(data).contains("damaged"), "Damaged state preserved for inspection");
+            Files.writeString(journal, "damaged\n");
+            try { new AuditLog(journal); throw new AssertionError("Damaged audit silently reset"); }
+            catch (java.io.IOException expected) { checks++; }
+        } finally {
+            try (var files = Files.walk(folder)) { for (Path p : files.sorted(Comparator.reverseOrder()).toList()) Files.deleteIfExists(p); }
+        }
+    }
+    private static void partialAndDenied() throws Exception {
+        DemoDirectory demo = new DemoDirectory(); AuditLog audit = new AuditLog();
+        Directory faulty = (Directory)Proxy.newProxyInstance(Directory.class.getClassLoader(), new Class[]{Directory.class}, (proxy, method, args) -> {
+            if (method.getName().equals("resetPassword")) throw new PartialOperationException("Password was set, but requiring a change at next sign-in failed. Inspect the account in ADUC.");
+            if (method.getName().equals("unlock")) throw new javax.naming.NoPermissionException("Private server diagnostic");
+            if (method.getName().equals("moveUser")) throw new javax.naming.CommunicationException("Private connection diagnostic");
+            try { return method.invoke(demo, args); } catch (InvocationTargetException e) { throw e.getCause(); }
+        });
+        try (Main app = new Main(faulty, 0, audit); HttpClient client = HttpClient.newHttpClient()) {
+            app.start(); URI base = URI.create("http://127.0.0.1:" + app.port());
+            String body = client.send(HttpRequest.newBuilder(base.resolve("/api/state")).GET().build(), HttpResponse.BodyHandlers.ofString()).body();
+            Matcher matcher = Pattern.compile("\"token\":\"([^\"]+)\"").matcher(body); check(matcher.find(), "Fault-test token"); String token = matcher.group(1);
+            var response = post(client, base.resolve("/api/action"), token, form("action", "reset-password", "username", "taylor.reed", "password", "Partial!Reset789"));
+            check(response.statusCode() == 502 && response.body().contains("Password was set"), "Partial AD outcome requires inspection");
+            check(audit.all().stream().anyMatch(e -> e.outcome().equals("PARTIAL")), "Partial operation distinctly audited");
+            response = post(client, base.resolve("/api/action"), token, form("action", "unlock", "username", "taylor.reed"));
+            check(response.statusCode() == 502 && !response.body().contains("Private server diagnostic"), "Denied AD action does not leak raw server diagnostics");
+            check(audit.all().stream().anyMatch(e -> e.outcome().equals("FAILED") && e.detail().equals("NoPermissionException")), "Denied operation recorded without sensitive diagnostic");
+            check(!audit.csv().contains("Partial!Reset789") && !audit.csv().contains("Private server diagnostic"), "Failure journal excludes credentials and raw diagnostics");
+            response = post(client, base.resolve("/api/action"), token, form("action", "move-user", "username", "taylor.reed", "ou", "IT"));
+            check(response.statusCode() == 502 && response.body().contains("may have completed"), "Connection loss reports uncertain outcome");
+            check(audit.all().stream().anyMatch(e -> e.action().equals("move-user") && e.outcome().equals("PARTIAL")), "Connection loss audited as uncertain, not definitive failure");
+            for (AuditLog.Event event : audit.all()) {
+                if (Set.of("PARTIAL", "FAILED", "SUCCEEDED").contains(event.outcome()))
+                    check(audit.all().stream().anyMatch(start -> start.id().equals(event.id()) && start.outcome().equals("STARTED")), "Final outcome correlates with its saved attempt");
+            }
+        }
+        DemoDirectory scenario = new DemoDirectory();
+        scenario.createOu("Helpdesk"); scenario.createGroup("GG_Helpdesk", "Helpdesk");
+        scenario.createUser("sam.rivera", "Sam Rivera", "Helpdesk", password("Scenario!Pass123"));
+        scenario.setMembership("sam.rivera", "GG_Helpdesk", true);
+        check(Scenarios.describe(scenario.snapshot(), List.of()).get(0).get("status").equals("Checks satisfied"), "Onboarding checks reflect actual directory state");
+        scenario.setMembership("sam.rivera", "GG_Helpdesk", false);
+        check(Scenarios.describe(scenario.snapshot(), List.of()).get(0).get("status").equals("Open"), "Ticket reopens when required access is removed");
+    }
+    private static void unavailableJournal() throws Exception {
+        Path folder = Files.createTempDirectory("adlab-journal-outage-");
+        AuditLog audit = new AuditLog(folder.resolve("audit.tsv"));
+        Files.delete(folder);
+        DemoDirectory directory = new DemoDirectory();
+        try (Main app = new Main(directory, 0, audit); HttpClient client = HttpClient.newHttpClient()) {
+            app.start(); URI base = URI.create("http://127.0.0.1:" + app.port());
+            String body = client.send(HttpRequest.newBuilder(base.resolve("/api/state")).GET().build(), HttpResponse.BodyHandlers.ofString()).body();
+            Matcher matcher = Pattern.compile("\"token\":\"([^\"]+)\"").matcher(body); check(matcher.find(), "Journal-outage token");
+            var response = post(client, base.resolve("/api/action"), matcher.group(1), form("action", "create-ou", "name", "MustNotExist"));
+            check(response.statusCode() == 500, "Journal outage refuses the action");
+            check(!directory.snapshot().ous().contains("MustNotExist"), "No mutation if the attempt cannot be saved");
+        }
     }
 }

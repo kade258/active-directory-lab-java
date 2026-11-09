@@ -7,7 +7,11 @@
 | Port 8080 occupied | Stop the earlier lab process or the application using that port. |
 | Dashboard unreachable | Open `http://127.0.0.1:8080` on the machine running Java; the server is loopback-only. |
 | Request token error | Reload after restarting Java. |
-| Demo changes disappeared | Expected: demo data is in memory and resets on restart. |
+| Demo changes disappeared | Confirm you started from the same working directory and `--data-dir`; changes persist in that folder. |
+| Data folder already in use | Stop the other process using that folder. Do not bypass its runtime lock. |
+| Damaged state/journal stops startup | Preserve the folder for inspection; use a fresh `--data-dir` for a new demo. The app does not silently discard evidence. |
+| STARTED without a final outcome | An interruption may have happened after the change. Inspect state before retrying. |
+| PARTIAL outcome | Some AD stages may have succeeded, connectivity may have obscured the result, or final logging failed. Inspect ADUC and storage. |
 | No password prompt | LDAP mode requires a real terminal with `System.console()`, not an IDE runner. |
 | Certificate failure | Check DC FQDN, validity, Server Authentication usage and Java CA trust. Do not bypass validation. |
 | LDAPS timeout | Check DNS, TCP 636, the isolated network, firewall rules and DC certificate setup. |

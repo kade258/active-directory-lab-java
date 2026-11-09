@@ -34,3 +34,15 @@ jobs:
             [System.Management.Automation.Language.Parser]::ParseFile($_.FullName, [ref]$tokens, [ref]$errors) | Out-Null
             if ($errors.Count -gt 0) { throw ($errors | Out-String) }
           }
+      - name: Package verified Java application
+        if: runner.os == 'Linux'
+        run: sha256sum .build/active-directory-lab.jar > .build/SHA256SUMS.txt
+      - name: Upload runnable Java application
+        if: runner.os == 'Linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: active-directory-lab-java21
+          path: |
+            .build/active-directory-lab.jar
+            .build/SHA256SUMS.txt
+          retention-days: 14

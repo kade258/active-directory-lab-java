@@ -19,9 +19,7 @@ public final class LdapDirectory implements Directory {
             (uri.getPath() != null && !uri.getPath().isEmpty()) || uri.getQuery() != null || uri.getFragment() != null)
             throw new IllegalArgumentException("ldap.url must be an ldaps://hostname:636 URL with no path or credentials.");
         root = required(config, "ldap.rootDn");
-        LdapName rootName = new LdapName(root);
-        if (rootName.size() < 3 || !rootName.getRdn(rootName.size() - 1).getType().equalsIgnoreCase("OU"))
-            throw new IllegalArgumentException("ldap.rootDn must name an existing dedicated lab OU, not a domain root.");
+        validateRoot(root);
         upnSuffix = required(config, "ldap.upnSuffix");
         if (!upnSuffix.matches("[a-zA-Z0-9.-]+")) throw new IllegalArgumentException("Invalid UPN suffix.");
         Hashtable<String, Object> env = new Hashtable<>();
@@ -40,6 +38,17 @@ public final class LdapDirectory implements Directory {
                 throw new IllegalArgumentException("Configured lab root is not an organizational unit.");
         } catch (Exception e) { opened.close(); throw e; }
         context = opened;
+    }
+
+    // Package-private seam for deterministic adapter tests; production always uses LDAPS above.
+    LdapDirectory(DirContext context, String root, String upnSuffix) throws Exception {
+        validateRoot(root);
+        this.context = context; this.root = root; this.upnSuffix = upnSuffix;
+    }
+    private static void validateRoot(String root) throws Exception {
+        LdapName name = new LdapName(root);
+        if (name.size() < 3 || !name.getRdn(name.size() - 1).getType().equalsIgnoreCase("OU"))
+            throw new IllegalArgumentException("ldap.rootDn must name an existing dedicated lab OU, not a domain root.");
     }
 
     private static String required(Properties config, String key) {
@@ -150,7 +159,7 @@ public final class LdapDirectory implements Directory {
             writePassword(dn, password);
             replace(dn, "userAccountControl", "512");
         } catch (Exception e) {
-            throw new NamingException("The user object was created but setup did not finish. Inspect the disabled account in ADUC before retrying.");
+            throw new PartialOperationException("The user object was created but setup did not finish. Inspect the account in ADUC before retrying; it should remain disabled until setup completes.");
         }
     }
     private void replace(String dn, String key, Object value) throws Exception {
@@ -165,7 +174,7 @@ public final class LdapDirectory implements Directory {
         try { replace(dn, "unicodePwd", bytes); }
         finally { Arrays.fill(bytes, (byte) 0); }
         try { replace(dn, "pwdLastSet", "0"); }
-        catch (Exception e) { throw new NamingException("Password was set, but requiring a change at next sign-in failed. Inspect the account in ADUC."); }
+        catch (Exception e) { throw new PartialOperationException("Password was set, but requiring a change at next sign-in failed. Inspect the account in ADUC."); }
     }
     @Override public synchronized void resetPassword(String username, char[] password) throws Exception {
         Validation.password(password); writePassword(find(username, "user"), password);
@@ -178,6 +187,17 @@ public final class LdapDirectory implements Directory {
                 member ? DirContext.ADD_ATTRIBUTE : DirContext.REMOVE_ATTRIBUTE, new BasicAttribute("member", userDn))});
         } catch (AttributeInUseException e) { if (!member) throw e; }
         catch (NoSuchAttributeException e) { if (member) throw e; }
+    }
+    @Override public synchronized void moveUser(String username, String ou) throws Exception {
+        String source = find(username, "user");
+        LdapName old = new LdapName(source);
+        String destination = scoped(new LdapName(ouDn(ou)).add(old.getRdn(old.size() - 1)).toString());
+        context.rename(source, destination);
+    }
+    @Override public synchronized void setEnabled(String username, boolean enabled) throws Exception {
+        String dn = find(username, "user");
+        int flags = Integer.parseInt(text(context.getAttributes(dn, new String[]{"userAccountControl"}), "userAccountControl", "512"));
+        replace(dn, "userAccountControl", Integer.toString(enabled ? flags & ~2 : flags | 2));
     }
     @Override public synchronized void close() throws NamingException { context.close(); }
 }
