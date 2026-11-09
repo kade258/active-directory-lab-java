@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Directory Lab · Java</title><link rel="stylesheet" href="/style.css"><script src="/app.js" defer></script>
+</head>
+<body>
+  <aside class="sidebar">
+    <a class="brand" href="/" aria-label="Directory Lab home"><span class="brand-icon">D</span><span>Directory<span class="brand-light">Lab</span></span></a>
+    <div class="workspace-label">YOUR WORKSPACE</div>
+    <nav aria-label="Main navigation">
+      <button class="nav-item active" data-tab="overview"><span>▦</span> Overview</button>
+      <button class="nav-item" data-tab="users"><span>♙</span> Users</button>
+      <button class="nav-item" data-tab="groups"><span>◈</span> Groups &amp; permissions</button>
+      <button class="nav-item" data-tab="ous"><span>▤</span> Organizational units</button>
+      <button class="nav-item" data-tab="activity"><span>◷</span> Activity</button>
+    </nav>
+    <div class="sidebar-footer"><span class="status-dot"></span> Java 21 <span class="footer-sub">Local administration lab</span></div>
+  </aside>
+  <main>
+    <header class="topbar"><span>Workspace <span class="slash">/</span> <strong id="breadcrumb">Overview</strong></span><div><span class="mode-badge" id="mode">Connecting</span><span class="avatar">KL</span></div></header>
+    <div class="page">
+      <div id="notice" class="notice" role="status" aria-live="polite" hidden></div>
+      <div class="page-heading"><div><div class="eyebrow">IDENTITY &amp; ACCESS</div><h1 id="page-title">Directory overview</h1><p id="page-description">A small directory. Real administration skills.</p></div><button class="primary" id="new-user">+ Create user</button></div>
+      <div class="environment" id="environment"><span class="environment-icon">⌘</span><div><strong id="environment-title">Preparing your workspace</strong><p id="environment-description">Loading directory information…</p></div><span class="environment-tag">LOCAL ONLY</span></div>
+      <section id="overview-panel" class="panel">
+        <div class="metrics">
+          <article class="metric"><div><span>Total users</span><span class="metric-icon">♙</span></div><strong id="user-count">—</strong><small>Directory accounts</small></article>
+          <article class="metric"><div><span>Security groups</span><span class="metric-icon">◈</span></div><strong id="group-count">—</strong><small>Access through membership</small></article>
+          <article class="metric"><div><span>Organizational units</span><span class="metric-icon">▤</span></div><strong id="ou-count">—</strong><small>Your directory structure</small></article>
+          <article class="metric"><div><span>Locked accounts</span><span class="metric-icon amber">⌑</span></div><strong id="locked-count">—</strong><small id="locked-caption">Ready to review</small></article>
+        </div>
+        <div class="section-title"><div><h2>Directory users</h2><p>Manage identities and resolve account issues.</p></div><label class="search-label"><span>⌕</span><input id="search" aria-label="Search users" placeholder="Search users…" type="search"></label></div>
+        <div class="table-wrap"><table><thead><tr><th>NAME</th><th>USERNAME</th><th>ORGANIZATIONAL UNIT</th><th>STATUS</th><th>ACTIONS</th></tr></thead><tbody id="user-rows"></tbody></table><div class="table-footer"><span id="user-summary">Loading users…</span><span>Passwords are never displayed</span></div></div>
+        <div class="bottom-grid"><article class="card learning-card"><span class="eyebrow">YOUR NEXT CHALLENGE</span><h2>Resolve a locked account</h2><p>Find a locked user, reset their password, then unlock the account. Check Activity to review what changed.</p><button class="text-button" id="challenge">Open account tools <span>↗</span></button></article><article class="card"><div class="section-title compact"><h2>Recent activity</h2><button class="text-button" id="view-activity">View all →</button></div><div id="recent-activity" class="activity-list"></div></article></div>
+      </section>
+      <section id="groups-panel" class="panel" hidden><div class="two-column"><article class="card"><h2>Create a security group</h2><p>Organize permissions through group membership.</p><form data-action="create-group"><label>Group name<input name="name" placeholder="GG_Helpdesk" required maxlength="20"></label><label>Organizational unit<select name="ou" class="ou-select" required></select></label><button class="primary">Create group</button></form></article><article class="card"><h2>Manage membership</h2><p>Add or remove a user's direct membership.</p><form data-action="membership"><label>User<select name="username" class="user-select" required></select></label><label>Security group<select name="group" class="group-select" required></select></label><label>Operation<select name="operation"><option value="add">Add to group</option><option value="remove">Remove from group</option></select></label><button class="primary">Update membership</button></form></article></div><div class="section-title"><h2>Security groups</h2></div><div id="group-cards" class="group-grid"></div><p class="footnote">Group membership represents access assignments. File and share permissions must be configured separately in Windows. Nested and primary-group membership are outside this lab's dashboard.</p></section>
+      <section id="ous-panel" class="panel" hidden><div class="two-column"><article class="card"><h2>Create an organizational unit</h2><p>Add a department directly beneath the lab root.</p><form data-action="create-ou"><label>OU name<input name="name" placeholder="Helpdesk" maxlength="64" required></label><button class="primary">Create organizational unit</button></form></article><article class="card"><h2>Directory structure</h2><p>Each OU can contain lab users and groups.</p><ul id="ou-list" class="ou-list"></ul></article></div></section>
+      <section id="activity-panel" class="panel" hidden><article class="card"><h2>Session activity</h2><p>The last 50 successful actions in this application session. Passwords are excluded. This is a learning aid; use domain-controller auditing for authoritative AD events.</p><div id="all-activity" class="activity-list"></div></article></section>
+      <footer class="page-footer"><span>DIRECTORY LAB <span class="footer-dot">·</span> Built with Java</span><span>Practice. Understand. Document.</span></footer>
+    </div>
+  </main>
+  <dialog id="user-dialog"><div class="dialog-head"><div><span class="eyebrow">DIRECTORY MANAGEMENT</span><h2>Create a user</h2></div><button class="close-dialog icon-button" aria-label="Close dialog">×</button></div><form data-action="create-user"><label>Full name<input name="displayName" placeholder="Sam Rivera" maxlength="64" required autocomplete="off"></label><label>Username<input name="username" placeholder="sam.rivera" maxlength="20" pattern="[a-zA-Z][a-zA-Z0-9._-]{0,19}" required autocomplete="off"></label><label>Organizational unit<select name="ou" class="ou-select" required></select></label><label>Initial password<input name="password" type="password" minlength="12" maxlength="128" required autocomplete="new-password"></label><p class="form-help">12–128 characters with uppercase, lowercase, a number and a symbol. Must change at next sign-in.</p><button class="primary">Create user</button></form></dialog>
+  <dialog id="account-dialog"><div class="dialog-head"><div><span class="eyebrow">ACCOUNT TOOLS</span><h2 id="account-title">Manage account</h2></div><button class="close-dialog icon-button" aria-label="Close dialog">×</button></div><form data-action="reset-password"><input type="hidden" name="username"><label>New password<input name="password" type="password" minlength="12" maxlength="128" autocomplete="new-password" required></label><p class="form-help">Use a unique password with uppercase, lowercase, a number and a symbol. Resetting does not unlock the account.</p><button class="primary">Reset password</button></form><div class="account-actions"><form data-action="unlock"><input type="hidden" name="username"><button class="secondary">Unlock account</button></form><form data-action="simulate-lock" id="lock-form"><input type="hidden" name="username"><button class="secondary">Simulate lock · demo</button></form></div></dialog>
+</body></html>

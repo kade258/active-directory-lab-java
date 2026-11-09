@@ -1,0 +1,30 @@
+# Java output and local IDE settings
+.build/
+target/
+*.class
+*.jar
+.idea/
+.vscode/
+*.iml
+.DS_Store
+
+# Local credentials, certificates and configuration
+.env
+.env.*
+!.env.example
+config/ldap.properties
+*.jks
+*.p12
+*.pfx
+*.key
+*.pem
+
+# VM media, local evidence and reports
+*.iso
+*.vhd
+*.vhdx
+*.vmdk
+*.vdi
+*.log
+evidence/
+reports/
